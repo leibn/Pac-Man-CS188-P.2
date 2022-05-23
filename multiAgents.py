@@ -11,8 +11,8 @@
 # Student side autograding was added by Brad Miller, Nick Hay, and
 # Pieter Abbeel (pabbeel@cs.berkeley.edu).
 
-
-from util import manhattanDistance
+import sys
+from util import manhattanDistance, Counter, PriorityQueueWithFunction
 from game import Directions
 import random, util
 
@@ -27,7 +27,6 @@ class ReflexAgent(Agent):
     it in any way you see fit, so long as you don't touch our method
     headers.
     """
-
 
     def getAction(self, gameState):
         """
@@ -65,6 +64,8 @@ class ReflexAgent(Agent):
 
         Print out these variables to see what you're getting, then combine them
         to create a masterful evaluation function.
+
+        It is a development of a "simple response agent", calculated by locations of food and locations of ghosts.
         """
         # Useful information you can extract from a GameState (pacman.py)
         successorGameState = currentGameState.generatePacmanSuccessor(action)
@@ -74,7 +75,34 @@ class ReflexAgent(Agent):
         newScaredTimes = [ghostState.scaredTimer for ghostState in newGhostStates]
 
         "*** YOUR CODE HERE ***"
-        return successorGameState.getScore()
+        # ghost cost :
+        nearestGhost = sys.maxsize  # Initialized to maximum value to perform "reflexive alpha beta"
+        for gState in newGhostStates:
+            ghostX, ghostY = gState.getPosition()
+            # I have no idea why pulling a "location" of a
+            #       "ghost" returns a tuple rather than a state
+            ghostX = int(ghostX)
+            ghostY = int(ghostY)
+            if gState.scaredTimer == 0:  # Can kill
+                nearestGhost = min(nearestGhost, manhattanDistance((ghostX, ghostY), newPos))
+        ghostCost = -(1.0 / (nearestGhost + 0.1))  # Balance to achieve a worthy result
+        # 0.1 Is for not dividing by 0
+
+        # Food cost:
+        foodAsList = newFood.asList()
+        # Using Queue from util.py
+        distToFoodQueue = PriorityQueueWithFunction(lambda x: manhattanDistance(x, newPos))
+        for food in foodAsList:
+            distToFoodQueue.push(food)
+        if distToFoodQueue.isEmpty():  # That means no more food
+            nearestFood = 0
+        else:
+            # The distance to the closest because it is a priority queue with a function
+            nearestFood = manhattanDistance(distToFoodQueue.pop(), newPos)
+        foodCost = (1.0 / (nearestFood + 0.1))  # Balance to achieve a worthy result
+        # 0.1 Is for not dividing by 0
+        return successorGameState.getScore() + foodCost + ghostCost
+
 
 def scoreEvaluationFunction(currentGameState):
     """
@@ -85,6 +113,7 @@ def scoreEvaluationFunction(currentGameState):
     (not reflex agents).
     """
     return currentGameState.getScore()
+
 
 class MultiAgentSearchAgent(Agent):
     """
@@ -135,7 +164,47 @@ class MinimaxAgent(MultiAgentSearchAgent):
         Returns whether or not the game state is a losing state
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # Start for the maximum agent
+        return self.maxStep(gameState, 1)
+
+    # Checks if the situation in our agent is inactive
+    def isInactive(self, gameState):
+        return gameState.isWin() or gameState.isLose() or self.depth == 0
+
+    def maxStep(self, gameState, depth):
+        if self.isInactive(gameState):  # Checks if the situation in our agent is inactive
+            return self.evaluationFunction(gameState)
+        maxVal = -sys.maxsize  # Initializes the maximum value (so-called beta)
+        bestStep = Directions.STOP  # Initialized to stop by class directions in game.py
+        for action in gameState.getLegalActions(0):
+            # Performs on each successor a minimum step according to the algorithm
+            successor = gameState.generateSuccessor(0, action)
+            actionVal = self.minStep(successor, depth, 1)
+            if actionVal > maxVal:  # He's better
+                maxVal = actionVal
+                bestStep = action
+        if depth > 1:
+            return maxVal  # A value will be returned in favor of a success calculation
+        return bestStep  # An action will be returned, since this is the stage for execution
+
+    def minStep(self, gameState, depth, agentIndex):
+        if self.isInactive(gameState):  # Checks if the situation in our agent is inactive
+            return self.evaluationFunction(gameState)
+        minVal = sys.maxsize  # Initializes the minimum value (so-called alpha)
+        legalActions = gameState.getLegalActions(agentIndex)
+        successors = [gameState.generateSuccessor(agentIndex, action) for action in legalActions]
+        if agentIndex == gameState.getNumAgents() - 1:
+            if depth < self.depth:  # It will be the turn of the maximum agent
+                for successor in successors:
+                    minVal = min(minVal, self.maxStep(successor, depth + 1))
+            else: # It will be the turn of the minimum agent
+                for successor in successors:
+                    minVal = min(minVal, self.evaluationFunction(successor))
+        else: # Last agent
+            for successor in successors:
+                minVal = min(minVal, self.minStep(successor, depth, agentIndex + 1))
+        return minVal # A value will be returned in favor of a success calculation
+
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
@@ -147,7 +216,53 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         Returns the minimax action using self.depth and self.evaluationFunction
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # Start for the maximum agent
+        return self.maxStep(gameState, 1, -sys.maxsize, sys.maxsize)
+
+    # Checks if the situation in our agent is inactive
+    def isInactive(self, gameState):
+        return gameState.isWin() or gameState.isLose() or self.depth == 0
+
+    def maxStep(self, gameState, depth, alpha, beta):
+        if self.isInactive(gameState):  # Checks if the situation in our agent is inactive
+            return self.evaluationFunction(gameState)
+        maxVal = -sys.maxsize  # Initializes the maximum value (so-called beta)
+        bestStep = Directions.STOP  # Initialized to stop by class directions in game.py
+        for action in gameState.getLegalActions(0):
+            # Performs on each successor a minimum step according to the algorithm
+            successor = gameState.generateSuccessor(0, action)
+            pruningValue = self.minStep(successor, depth, 1, alpha, beta)
+            if pruningValue > maxVal:  # He's better
+                maxVal = pruningValue
+                bestStep = action
+            if maxVal > beta: # Puring will act
+                return maxVal
+            alpha = max(alpha, maxVal)
+        if depth > 1:
+            return maxVal  # A value will be returned in favor of a success calculation
+        return bestStep  # An action will be returned, since this is the stage for execution
+
+    def minStep(self, gameState, depth, agentIndex, alpha, beta):
+        if self.isInactive(gameState):  # Checks if the situation in our agent is inactive
+            return self.evaluationFunction(gameState)
+        minVal = sys.maxsize  # Initializes the minimum value (so-called alpha)
+        for action in gameState.getLegalActions(agentIndex):
+            successor = gameState.generateSuccessor(agentIndex, action)
+            if agentIndex == gameState.getNumAgents() - 1:
+                if depth < self.depth: # It will be the turn of the maximum agent
+                    pruningValue = self.maxStep(successor, depth + 1, alpha, beta)
+                else:  # It will be the turn of the minimum agent
+                    pruningValue = self.evaluationFunction(successor)
+            else:  # Last agent
+                pruningValue = self.minStep(successor, depth, agentIndex + 1, alpha, beta)
+            # puring check
+            if pruningValue < minVal:
+                minVal = pruningValue
+            if minVal < alpha:
+                return minVal
+            beta = min(beta, minVal)
+        return minVal # A value will be returned in favor of a success calculation
+
 
 class ExpectimaxAgent(MultiAgentSearchAgent):
     """
@@ -162,17 +277,112 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         legal moves.
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # Start for the maximum agent
+        return self.maxStep(gameState, 1)
+
+    # Checks if the situation in our agent is inactive
+    def isInactive(self, gameState):
+        return gameState.isWin() or gameState.isLose() or self.depth == 0
+
+    def maxStep(self, gameState, depth):
+        if self.isInactive(gameState):  # Checks if the situation in our agent is inactive
+            return self.evaluationFunction(gameState)
+        maxVal = -sys.maxsize  # Initializes the maximum value (so-called beta)
+        bestStep = Directions.STOP  # Initialized to stop by class directions in game.py
+        for action in gameState.getLegalActions(0):
+            # Performs on each successor a probabilistic minimum step according to the algorithm
+            successor = gameState.generateSuccessor(0, action)
+            probabilisticPuringValue = self.minStep(successor, depth, 1)
+            # Pruning test in relation to the probabilistic value
+            if probabilisticPuringValue > maxVal:
+                maxVal = probabilisticPuringValue
+                bestStep = action
+        if depth > 1:
+            return maxVal  # A value will be returned in favor of a success calculation
+        return bestStep   # An action will be returned, since this is the stage for execution
+
+    def minStep(self, gameState, depth, agentIndex):
+        if self.isInactive(gameState):  # Checks if the situation in our agent is inactive
+            return self.evaluationFunction(gameState)
+        legalActions = gameState.getLegalActions(agentIndex)
+        successors = [gameState.generateSuccessor(agentIndex, action) for action in legalActions]
+        probabilityPuringValue = 0
+        probabilityForMove = 1.0 / len(legalActions)
+        if agentIndex == gameState.getNumAgents() - 1:  # Last Agent
+            if depth < self.depth:
+                for successor in successors: # check Using the max step
+                    probabilityPuringValue += probabilityForMove * self.maxStep(successor, depth + 1)
+            else:  # good time to evaluation Function
+                for successor in successors:  # check Using the evaluationFunction
+                    probabilityPuringValue += probabilityForMove * self.evaluationFunction(successor)
+        else:  # not the last agent
+            for successor in successors: # check Using the min step
+                probabilityPuringValue += probabilityForMove * self.minStep(successor, depth, agentIndex + 1)
+        return probabilityPuringValue
+
 
 def betterEvaluationFunction(currentGameState):
     """
     Your extreme ghost-hunting, pellet-nabbing, food-gobbling, unstoppable
     evaluation function (question 5).
 
-    DESCRIPTION: <write something here so we know what you did>
+    DESCRIPTION: evaluate of state rate to win in game
     """
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+
+    # State score
+    currentPosition = currentGameState.getPacmanPosition()
+    # we will change the power of the state score power with a value of 1 to a power with a value of 1.5
+    stateScore = 37 * currentGameState.getScore()
+
+    # Capsules score
+    capsQueue = PriorityQueueWithFunction(lambda x: manhattanDistance(currentPosition, x))
+    capsCounter = Counter()
+    for cap in currentGameState.data.capsules:
+        capsCounter[str(cap)] = manhattanDistance(currentPosition, cap)
+        capsQueue.push(cap)
+    if capsQueue.isEmpty():
+        contraPositiveNearestCapsDist = 100
+    else:
+        # For giving a positive result
+        contraPositiveNearestCapsDist = 100 - manhattanDistance(currentPosition, capsQueue.pop())
+    # using counter from util
+    capsTotalDistant = capsCounter.totalCount()
+    # For the State evaluate function to be good A change was made in the "factor" of the parameters
+    capsScore = -8 * capsTotalDistant + 10 * contraPositiveNearestCapsDist
+
+    # Ghost score
+    ghostStates = currentGameState.getGhostStates()
+    ghostQueue = PriorityQueueWithFunction(lambda x: manhattanDistance(currentPosition, x.getPosition()))
+    ghostScaredCounter = Counter()
+    for ghost in ghostStates:
+        ghostQueue.push(ghost)
+        ghostScaredCounter[str(ghost)] = ghost.scaredTimer
+    nearestGhostDist = manhattanDistance(currentPosition, ghostQueue.pop().getPosition())
+    # For the State evaluate function to be good A change was made in the "factor" of the parameters,
+    # and factor multiplying between number of ghosts and number of capsules
+    ghostScore = 3 * nearestGhostDist + 30 * ghostScaredCounter.totalCount() * capsQueue.count
+
+    # Food score
+    foods = currentGameState.getFood()
+    foodsPos = foods.asList()
+    numFood = currentGameState.getNumFood()
+    foodQueue = PriorityQueueWithFunction(lambda x: manhattanDistance(currentPosition, x))
+    for food in foodsPos:
+        foodQueue.push(food)
+    if foodQueue.isEmpty():
+        distClosestFood = 0
+    else:
+        nearestFood = foodQueue.pop()
+        distClosestFood = manhattanDistance(currentPosition, nearestFood)
+    if numFood < nearestGhostDist:
+        numFood = nearestGhostDist
+    # For the State evaluate function to be good A change was made in the "factor" of the parameters
+    foodScore = - 9 * distClosestFood - 10 * numFood
+
+    # Total score
+    return ghostScore + capsScore + stateScore + foodScore
+
 
 # Abbreviation
 better = betterEvaluationFunction
